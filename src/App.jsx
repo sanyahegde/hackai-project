@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
+import SkillRadarChart from "./components/SkillRadarChart";
 
 /* ═══════════════════════════════════════════════════
    CONFIG
@@ -80,8 +82,18 @@ function extractVideoId(url) {
    MAIN COMPONENT
    ═══════════════════════════════════════════════════ */
 export default function App() {
+  const [searchParams] = useSearchParams();
   const [videoUrl, setVideoUrl] = useState("");
   const [videoId, setVideoId] = useState(null);
+
+  // Pre-fill video from URL (e.g. /?video=VIDEO_ID)
+  useEffect(() => {
+    const video = searchParams.get("video");
+    if (video && video.trim().length === 11) {
+      setVideoUrl(`https://www.youtube.com/watch?v=${video}`);
+      setVideoId(video);
+    }
+  }, [searchParams]);
   const [isPaused, setIsPaused] = useState(false);
   const [concepts, setConcepts] = useState([]);
   const [selectedConcept, setSelectedConcept] = useState(null);
@@ -97,6 +109,8 @@ export default function App() {
   const [selectedHistoryScan, setSelectedHistoryScan] = useState(null);
   const [startSeconds, setStartSeconds] = useState(0);
   const [recommendedChapter, setRecommendedChapter] = useState(null);
+  const [recommendation, setRecommendation] = useState(null);
+  const [skillScores, setSkillScores] = useState(null);
 
   const playerRef = useRef(null);
   const playerInstanceRef = useRef(null);
@@ -383,8 +397,9 @@ export default function App() {
     }
   }, [isPaused, videoId, loading, analyzeFrame]);
 
-  /* ── Log concept click ── */
+  /* ── Log concept click → POST /api/log-concept, then GET /api/skill-scores ── */
   const handleConceptClick = (concept) => {
+    console.log("[LearnFlow] Bubble clicked:", concept.name, concept.category ?? "general");
     setSelectedConcept(concept);
     setLearningLog((prev) => {
       if (prev.find((l) => l.name === concept.name)) return prev;
@@ -397,18 +412,72 @@ export default function App() {
       }];
     });
 
-    // Persist to backend (fire-and-forget; UI stays instant)
+    const payload = {
+      user_id: USER_ID,
+      concept: concept.name,
+      concept_name: concept.name,
+      category: concept.category || "general",
+      video_id: videoId || "",
+      timestamp: currentTime,
+    };
+    console.log("[LearnFlow] POST /api/log-concept payload:", payload);
+
     fetch(`${API_BASE}/api/log-concept`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: USER_ID,
-        concept: concept.name,
-        category: concept.category || "general",
-        video_id: videoId || "",
-        timestamp: currentTime,
-      }),
-    }).catch((err) => console.warn("log-concept failed:", err));
+      body: JSON.stringify(payload),
+    })
+      .then((res) => {
+        if (res.ok) {
+          console.log("[LearnFlow] POST /api/log-concept succeeded");
+          return fetch(`${API_BASE}/api/skill-scores/${USER_ID}`);
+        }
+        console.warn("[LearnFlow] POST /api/log-concept failed:", res.status);
+        return null;
+      })
+      .then((scoreRes) => {
+        if (scoreRes && scoreRes.ok) {
+          return scoreRes.json();
+        }
+        return null;
+      })
+      .then((data) => {
+        if (data) {
+          console.log("[LearnFlow] GET /api/skill-scores response:", data);
+          setSkillScores(data);
+        }
+      })
+      .catch((err) => console.warn("[LearnFlow] log-concept or skill-scores request failed:", err));
+  };
+
+  const loadRecommendedNext = async () => {
+    const query = skillScores?.learn_next
+      ? `${skillScores.learn_next} tutorial`
+      : recommendation?.recommended_query;
+    if (!query) return;
+    setError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/video-for-topic?topic=${encodeURIComponent(query)}`
+      );
+      const data = await res.json();
+      if (data.error || !data.video_id) {
+        setError(data.error || "No video found. Try another topic.");
+        return;
+      }
+      setVideoUrl(data.url || `https://www.youtube.com/watch?v=${data.video_id}`);
+      setVideoId(data.video_id);
+      setConcepts([]);
+      setSelectedConcept(null);
+      setHasScanned(false);
+      setCapturedFramePreview(null);
+      setScanHistory([]);
+      setSelectedHistoryScan(null);
+      setRecommendedChapter(null);
+      setStartSeconds(0);
+    } catch (err) {
+      setError("Could not load recommended video. Is the backend running?");
+    }
   };
 
   /* ═══════════════════════════════════════════════════
@@ -1101,28 +1170,12 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Next steps placeholder */}
-                <div style={{
-                  padding: 14,
-                  background: "rgba(99,102,241,0.05)",
-                  border: "1px solid rgba(99,102,241,0.12)",
-                  borderRadius: 8,
+                <p style={{
+                  fontSize: 11, color: "rgba(255,255,255,0.35)",
+                  fontFamily: "'DM Sans', sans-serif",
                 }}>
-                  <p style={{
-                    fontSize: 10, color: "rgba(99,102,241,0.6)",
-                    textTransform: "uppercase", letterSpacing: "1px",
-                    marginBottom: 6, fontWeight: 600,
-                    fontFamily: "'DM Mono', monospace",
-                  }}>Coming next</p>
-                  <p style={{
-                    fontSize: 12, color: "rgba(255,255,255,0.4)",
-                    lineHeight: 1.5,
-                    fontFamily: "'DM Sans', sans-serif",
-                  }}>
-                    Practice problems, related video timestamps,
-                    and personalized next-step recommendations will appear here.
-                  </p>
-                </div>
+                  Next video is recommended in the sidebar based on your concept clicks.
+                </p>
 
                 {learningLog.find((l) => l.name === selectedConcept.name) && (
                   <div style={{
@@ -1196,12 +1249,12 @@ export default function App() {
                   <>
                     <h3 style={{
                       fontSize: 10, fontWeight: 600,
-                      color: "rgba(255,255,255,0.25)",
+                      color: "rgba(255,255,255,0.35)",
                       textTransform: "uppercase",
                       letterSpacing: "1.5px",
                       margin: "0 6px 12px",
                       fontFamily: "'DM Mono', monospace",
-                    }}>Detected · {concepts.length}</h3>
+                    }}>Detected Concepts</h3>
 
                     {concepts.map((c, i) => {
                       const color = getColor(c.category);
@@ -1247,6 +1300,79 @@ export default function App() {
                     })}
                   </>
                 )}
+
+                {/* Your Skill Map — radar chart (updates automatically after each concept click) */}
+                <div style={{
+                  marginTop: 24,
+                  padding: "14px 0",
+                  borderTop: "1px solid rgba(255,255,255,0.08)",
+                }}>
+                  <h3 style={{
+                    fontSize: 10, fontWeight: 600,
+                    color: "rgba(255,255,255,0.35)",
+                    textTransform: "uppercase",
+                    letterSpacing: "1.5px",
+                    marginBottom: 12,
+                    fontFamily: "'DM Mono', monospace",
+                  }}>Your Skill Map</h3>
+                  <div style={{ width: "100%", minHeight: 250 }}>
+                    <SkillRadarChart scores={skillScores?.scores ?? []} />
+                  </div>
+                </div>
+
+                {/* Next to Learn — learn_next, reason, Watch next */}
+                <div style={{
+                  marginTop: 20,
+                  padding: 14,
+                  background: "rgba(99,102,241,0.06)",
+                  border: "1px solid rgba(99,102,241,0.15)",
+                  borderRadius: 8,
+                }}>
+                  <h3 style={{
+                    fontSize: 10, fontWeight: 600,
+                    color: "rgba(255,255,255,0.35)",
+                    textTransform: "uppercase",
+                    letterSpacing: "1.5px",
+                    marginBottom: 10,
+                    fontFamily: "'DM Mono', monospace",
+                  }}>Next to Learn</h3>
+                  {skillScores?.learn_next && (
+                    <div style={{
+                      fontSize: 13, fontWeight: 600,
+                      color: "rgba(255,255,255,0.95)",
+                      fontFamily: "'DM Sans', sans-serif",
+                      marginBottom: 6,
+                    }}>Learn next: {skillScores.learn_next}</div>
+                  )}
+                  {skillScores?.reason && (
+                    <p style={{
+                      fontSize: 11, color: "rgba(255,255,255,0.55)",
+                      lineHeight: 1.5, marginBottom: 12,
+                      fontFamily: "'DM Sans', sans-serif",
+                    }}>Reason: {skillScores.reason}</p>
+                  )}
+                  {(skillScores?.learn_next || recommendation?.recommended_query) && (
+                    <button
+                      type="button"
+                      onClick={loadRecommendedNext}
+                      style={{
+                        width: "100%", padding: "8px 12px",
+                        background: "#6366f1",
+                        border: "none", borderRadius: 8,
+                        color: "#fff", fontSize: 12, fontWeight: 600,
+                        cursor: "pointer",
+                        fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      Watch next
+                    </button>
+                  )}
+                  {!skillScores?.learn_next && !recommendation?.recommended_query && (
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "'DM Sans', sans-serif" }}>
+                      Click concept bubbles to get a recommendation.
+                    </p>
+                  )}
+                </div>
 
                 {/* Past Scans */}
                 {scanHistory.length > 0 && (
@@ -1311,22 +1437,23 @@ export default function App() {
               </div>
             )}
 
-            {/* Learning log footer */}
+            {/* Learning Log — recent concept clicks this session (most recent first) */}
             {learningLog.length > 0 && (
               <div style={{
                 padding: "14px 16px",
-                borderTop: "1px solid rgba(255,255,255,0.06)",
+                borderTop: "1px solid rgba(255,255,255,0.08)",
               }}>
-                <h4 style={{
+                <h3 style={{
                   fontSize: 10, fontWeight: 600,
-                  color: "rgba(255,255,255,0.2)",
-                  textTransform: "uppercase", letterSpacing: "1px",
+                  color: "rgba(255,255,255,0.35)",
+                  textTransform: "uppercase",
+                  letterSpacing: "1.5px",
                   marginBottom: 8,
                   fontFamily: "'DM Mono', monospace",
-                }}>Learning Log</h4>
+                }}>Learning Log</h3>
                 <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                  {learningLog.map((l, i) => (
-                    <span key={i} style={{
+                  {[...learningLog].reverse().map((l, i) => (
+                    <span key={`${l.name}-${i}`} style={{
                       padding: "2px 7px", borderRadius: 4,
                       background: getColor(l.category).ring,
                       color: getColor(l.category).text,

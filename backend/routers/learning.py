@@ -2,12 +2,32 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
-from db import get_learning_history, get_watched_videos
-from models import LogConceptRequest, LogWatchedRequest
+from db import get_learning_history, get_watched_videos, get_profiles
+from models import LogConceptRequest, LogWatchedRequest, ProfileRequest
 from services.skill_scorer import compute_skill_scores
 from services.recommender import get_recommendations, get_video_for_topic
 
 router = APIRouter(prefix="/api")
+
+
+@router.post("/profile", status_code=201)
+async def save_profile(body: ProfileRequest):
+    """Save onboarding profile (role, goal, existing_skills, time_constraint)."""
+    col = get_profiles()
+    doc = {
+        "user_id": body.user_id,
+        "role": body.role,
+        "goal": body.goal,
+        "existing_skills": body.existing_skills,
+        "time_constraint": body.time_constraint,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    col.update_one(
+        {"user_id": body.user_id},
+        {"$set": doc},
+        upsert=True,
+    )
+    return {"status": "ok", "user_id": body.user_id}
 
 
 @router.post("/log-watched", status_code=201)

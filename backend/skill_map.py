@@ -1,13 +1,23 @@
-# Simple dict: category name -> list of keywords for TF-IDF
+"""
+Predefined DSA skill map: skill name -> keyword string for TF-IDF.
+Used to compare user concept-click history against each skill document.
+"""
+
+# Skill name -> space-separated keywords (concept terms that belong to this skill)
 SKILL_MAP = {
-    "Binary Search": ["binary search", "bisect", "sorted array", "log n search", "lower bound", "upper bound"],
-    "Dynamic Programming": ["dynamic programming", "dp", "memoization", "optimal substructure", "recurrence", "tabulation"],
-    "Graph": ["graph", "bfs", "dfs", "adjacency", "dijkstra", "shortest path", "connected component", "topological sort"],
-    "Two Pointers": ["two pointers", "sliding window", "left right pointer"],
-    "Backtracking": ["backtracking", "recursion", "permutation", "combination", "subset"],
-    "Sorting": ["sorting", "quicksort", "mergesort", "heap sort", "bubble sort"],
-    "Heap": ["heap", "priority queue", "min heap", "max heap"],
-    "Hash Table": ["hash table", "hash map", "hash set", "dictionary"],
-    "Tree": ["tree", "binary tree", "bst", "traversal", "inorder", "preorder", "postorder"],
-    "String": ["string", "substring", "palindrome", "pattern matching"],
+    "Arrays": "array index slice subarray prefix sum two pointers sliding window",
+    "Strings": "string substring palindrome pattern matching anagram character",
+    "Hash Tables": "hash table hash map hash set dictionary key value lookup",
+    "Sorting": "sort quicksort mergesort heapsort bubble sort insertion sort",
+    "Binary Search": "binary search bisect sorted array log n lower bound upper bound",
+    "Trees": "tree binary tree bst traversal inorder preorder postorder node leaf",
+    "Graphs": "graph bfs dfs traversal node edge adjacency shortest path dijkstra",
+    "Heaps": "heap min heap max heap priority queue scheduling k largest",
+    "Backtracking": "backtracking recursion permutation combination subset explore",
+    "Dynamic Programming": "dynamic programming dp memoization recurrence tabulation",
 }
+
+
+def get_skill_documents():
+    """Return list of (skill_name, keyword_text) for TF-IDF corpus."""
+    return [(name, text) for name, text in SKILL_MAP.items()]

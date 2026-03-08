@@ -1,6 +1,7 @@
+import certifi
 from pymongo import MongoClient
 
-from config import MONGODB_URI
+from config import MONGODB_URI, MONGODB_DB_NAME
 
 _client = None
 _db = None
@@ -12,16 +13,21 @@ def get_db():
         return _db
     if not MONGODB_URI:
         raise ValueError("MONGODB_URI is not set. Add it to backend/.env")
-    _client = MongoClient(MONGODB_URI)
-    _db = _client.get_default_database()
-    if _db is None:
-        _db = _client["learnflow"]
+    _client = MongoClient(
+        MONGODB_URI,
+        tls=True,
+        tlsCAFile=certifi.where(),
+    )
+    _db = _client[MONGODB_DB_NAME]
+    print(f"[MongoDB] Using database: {MONGODB_DB_NAME}")
+    _client.admin.command("ping")
+    print("[MongoDB] Connection ping succeeded.")
     return _db
 
 
-def get_learning_history():
-    return get_db()["learning_history"]
+def get_profiles():
+    return get_db()["profiles"]
 
 
-def get_watched_videos():
-    return get_db()["watched_videos"]
+def get_concept_logs():
+    return get_db()["concept_logs"]

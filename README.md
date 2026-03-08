@@ -1,12 +1,69 @@
 # LearnFlow
 
-Frontend-only AI video learning tool. Pause any YouTube video — AI detects concepts on screen, explains them, and saves past scans so you can revisit later.
+AI video learning tool. Pause any YouTube video — AI detects concepts on screen, explains them, and saves past scans. Optional backend stores learning history and powers recommendations.
 
-**Stack:** React + Vite, Anthropic Claude (direct from browser), YouTube IFrame API, Screen Capture API.
+**Stack:** React + Vite, Anthropic Claude (browser), YouTube IFrame API, Screen Capture API. Optional: FastAPI backend, MongoDB, sentence-transformers.
 
 ---
 
-## Quick start
+## Run locally (full stack)
+
+**1. Frontend**
+
+```bash
+npm install
+```
+
+Create `.env` in the project root with your Anthropic key:
+
+```
+VITE_ANTHROPIC_API_KEY=your_key_here
+```
+
+Get a key at [console.anthropic.com](https://console.anthropic.com/).
+
+```bash
+npm run dev
+```
+
+Open **http://localhost:3000**.
+
+**2. Backend** (for learning history & recommendations)
+
+All backend dependency installs must run inside the backend virtual environment, not system Python:
+
+```bash
+cd backend
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+If sentence-transformers / PyTorch fail due to NumPy compatibility, pin NumPy in the venv:
+
+```bash
+cd backend
+source venv/bin/activate
+pip install numpy==1.26.4
+```
+
+Create `backend/.env`:
+
+```
+MONGODB_URI=your_mongodb_atlas_uri
+YOUTUBE_API_KEY=   # optional, for YouTube search
+```
+
+Then:
+
+```bash
+uvicorn main:app --reload --port 8000
+```
+
+Backend runs at **http://localhost:8000**. First startup downloads the sentence-transformers model (~80MB, one-time).
+
+---
+
+## Quick start (frontend only)
 
 ```bash
 npm install
@@ -17,8 +74,6 @@ Create `.env` in the project root:
 ```
 VITE_ANTHROPIC_API_KEY=your_key_here
 ```
-
-Get a key at [console.anthropic.com](https://console.anthropic.com/).
 
 ```bash
 npm run dev

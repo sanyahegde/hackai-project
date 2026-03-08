@@ -1320,7 +1320,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Next to Learn — learn_next, reason, Watch next */}
+                {/* Next to Learn — top skill signals + recommended topic, Watch next */}
                 <div style={{
                   marginTop: 20,
                   padding: 14,
@@ -1336,42 +1336,73 @@ export default function App() {
                     marginBottom: 10,
                     fontFamily: "'DM Mono', monospace",
                   }}>Next to Learn</h3>
-                  {skillScores?.learn_next && (
-                    <div style={{
-                      fontSize: 13, fontWeight: 600,
-                      color: "rgba(255,255,255,0.95)",
-                      fontFamily: "'DM Sans', sans-serif",
-                      marginBottom: 6,
-                    }}>Learn next: {skillScores.learn_next}</div>
-                  )}
-                  {skillScores?.reason && (
-                    <p style={{
-                      fontSize: 11, color: "rgba(255,255,255,0.55)",
-                      lineHeight: 1.5, marginBottom: 12,
-                      fontFamily: "'DM Sans', sans-serif",
-                    }}>Reason: {skillScores.reason}</p>
-                  )}
-                  {(skillScores?.learn_next || recommendation?.recommended_query) && (
-                    <button
-                      type="button"
-                      onClick={loadRecommendedNext}
-                      style={{
-                        width: "100%", padding: "8px 12px",
-                        background: "#6366f1",
-                        border: "none", borderRadius: 8,
-                        color: "#fff", fontSize: 12, fontWeight: 600,
-                        cursor: "pointer",
-                        fontFamily: "'DM Sans', sans-serif",
-                      }}
-                    >
-                      Watch next
-                    </button>
-                  )}
-                  {!skillScores?.learn_next && !recommendation?.recommended_query && (
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "'DM Sans', sans-serif" }}>
-                      Click concept bubbles to get a recommendation.
-                    </p>
-                  )}
+                  {(() => {
+                    const scores = skillScores?.scores ?? [];
+                    const topSignals = scores.filter((s) => s.score > 0).slice(0, 2);
+                    const hasSignals = topSignals.length > 0;
+                    const learnNext = skillScores?.learn_next;
+                    if (!hasSignals && !learnNext) {
+                      return (
+                        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "'DM Sans', sans-serif" }}>
+                          Interact with concepts to build your skill map.
+                        </p>
+                      );
+                    }
+                    return (
+                      <>
+                        {hasSignals && (
+                          <>
+                            <p style={{
+                              fontSize: 11,
+                              color: "rgba(255,255,255,0.55)",
+                              marginBottom: 6,
+                              fontFamily: "'DM Sans', sans-serif",
+                            }}>
+                              Based on your recent activity, the system suggests focusing on:
+                            </p>
+                            <ul style={{
+                              margin: "0 0 10px 18px",
+                              padding: 0,
+                              fontSize: 11,
+                              color: "rgba(255,255,255,0.75)",
+                              fontFamily: "'DM Sans', sans-serif",
+                              lineHeight: 1.6,
+                            }}>
+                              {topSignals.map((s, i) => (
+                                <li key={i}>{s.skill}</li>
+                              ))}
+                            </ul>
+                          </>
+                        )}
+                        {learnNext && (
+                          <p style={{
+                            fontSize: 13, fontWeight: 600,
+                            color: "rgba(255,255,255,0.95)",
+                            marginBottom: 12,
+                            fontFamily: "'DM Sans', sans-serif",
+                          }}>
+                            Recommended next topic: {learnNext}
+                          </p>
+                        )}
+                        {(learnNext || recommendation?.recommended_query) && (
+                          <button
+                            type="button"
+                            onClick={loadRecommendedNext}
+                            style={{
+                              width: "100%", padding: "8px 12px",
+                              background: "#6366f1",
+                              border: "none", borderRadius: 8,
+                              color: "#fff", fontSize: 12, fontWeight: 600,
+                              cursor: "pointer",
+                              fontFamily: "'DM Sans', sans-serif",
+                            }}
+                          >
+                            Watch next
+                          </button>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
 
                 {/* Past Scans */}

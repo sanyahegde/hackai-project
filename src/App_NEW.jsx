@@ -2,6 +2,18 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 
 const ANTHROPIC_API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY;
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+
+function getOrCreateUserId() {
+  let id = localStorage.getItem("learnflow_user_id");
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem("learnflow_user_id", id);
+  }
+  return id;
+}
+
+const USER_ID = getOrCreateUserId();
 
 export default function App() {
   const [searchParams] = useSearchParams();
@@ -51,15 +63,50 @@ export default function App() {
     }
   };
 
-  // Analyze frame - takes pre-captured base64 image
-  const analyze = useCallback(async (base64) => {
-    if (!base64) return;
+  // Capture frame
+  const captureFrame = async () => {
+    if (!screenStreamRef.current) throw new Error("No capture");
+
+    const imageCapture = new ImageCapture(screenStreamRef.current);
+    const bitmap = await imageCapture.grabFrame();
+
+    const playerEl = playerRef.current;
+    const rect = playerEl.getBoundingClientRect();
+
+    const canvas = document.createElement("canvas");
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+
+    const ctx = canvas.getContext("2d");
+    const scaleX = bitmap.width / window.screen.width;
+    const scaleY = bitmap.height / window.screen.height;
+
+    ctx.drawImage(
+      bitmap,
+      rect.left * scaleX,
+      rect.top * scaleY,
+      rect.width * scaleX,
+      rect.height * scaleY,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+
+    return canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+  };
+
+  // Analyze frame
+  const analyze = useCallback(async () => {
+    if (!captureReady) return;
 
     setLoading(true);
     setError(null);
     setConcepts([]);
 
     try {
+      const base64 = await captureFrame();
 
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -105,7 +152,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [captureReady]);
 
   // Load video
   const loadVideo = () => {
@@ -135,46 +182,10 @@ export default function App() {
       height: "100%",
       playerVars: { autoplay: 1, controls: 1 },
       events: {
-        onStateChange: async (e) => {
+        onStateChange: (e) => {
           if (e.data === window.YT.PlayerState.PAUSED) {
-            if (screenStreamRef.current) {
-              try {
-                const imageCapture = new ImageCapture(screenStreamRef.current);
-                const bitmap = await imageCapture.grabFrame();
-
-                const playerEl = playerRef.current;
-                const rect = playerEl.getBoundingClientRect();
-
-                const canvas = document.createElement("canvas");
-                const dpr = window.devicePixelRatio || 1;
-                canvas.width = rect.width * dpr;
-                canvas.height = rect.height * dpr;
-
-                const ctx = canvas.getContext("2d");
-                const scaleX = bitmap.width / window.screen.width;
-                const scaleY = bitmap.height / window.screen.height;
-
-                ctx.drawImage(
-                  bitmap,
-                  rect.left * scaleX,
-                  rect.top * scaleY,
-                  rect.width * scaleX,
-                  rect.height * scaleY,
-                  0, 0,
-                  canvas.width,
-                  canvas.height
-                );
-
-                const base64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
-                setIsPaused(true);
-                analyze(base64);
-              } catch (err) {
-                console.error("Capture failed:", err);
-                setIsPaused(true);
-              }
-            } else {
-              setIsPaused(true);
-            }
+            setIsPaused(true);
+            setTimeout(analyze, 500);
           } else {
             setIsPaused(false);
             setConcepts([]);
@@ -227,44 +238,50 @@ export default function App() {
         <div style={{ marginTop: 20, position: "relative", width: 800, height: 450 }}>
           <div ref={playerRef} style={{ width: "100%", height: "100%" }} />
 
-          {/* Concept dots - no overlay, just dots on top of paused video */}
-          {isPaused && concepts.map((c, i) => (
+          {isPaused && (
             <div
-              key={i}
               style={{
                 position: "absolute",
-                left: `${c.x}%`,
-                top: `${c.y}%`,
-                background: "#6366f1",
-                color: "#fff",
-                padding: "5px 10px",
-                borderRadius: 5,
-                fontSize: 12,
-                transform: "translate(-50%, -50%)",
-                cursor: "pointer",
-                zIndex: 20,
-                boxShadow: "0 2px 10px rgba(0,0,0,0.5)",
+                inset: 0,
+                background: "rgba(0,0,0,0.5)",
+                zIndex: 10,
               }}
-              onClick={() => alert(c.description)}
             >
-              {c.name}
-            </div>
-          ))}
+              {loading && <p style={{ textAlign: "center", marginTop: 200 }}>Analyzing...</p>}
 
-          {/* Loading indicator */}
-          {loading && (
-            <div style={{
-              position: "absolute",
-              top: 10,
-              left: 10,
-              background: "rgba(0,0,0,0.7)",
-              color: "#fff",
-              padding: "5px 10px",
-              borderRadius: 5,
-              fontSize: 12,
-              zIndex: 20,
-            }}>
-              Analyzing...
+              {concepts.map((c, i) => (
+                <div
+                  key={i}
+                  style={{
+                    position: "absolute",
+                    left: `${c.x}%`,
+                    top: `${c.y}%`,
+                    background: "#00f",
+                    color: "#fff",
+                    padding: "5px 10px",
+                    borderRadius: 5,
+                    fontSize: 12,
+                    transform: "translate(-50%, -50%)",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => alert(c.description)}
+                >
+                  {c.name}
+                </div>
+              ))}
+
+              <button
+                onClick={() => playerInstanceRef.current?.playVideo()}
+                style={{
+                  position: "absolute",
+                  bottom: 20,
+                  right: 20,
+                  padding: 10,
+                  zIndex: 20,
+                }}
+              >
+                ▶ Resume
+              </button>
             </div>
           )}
         </div>

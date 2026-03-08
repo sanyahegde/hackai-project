@@ -30,3 +30,7 @@ class ProfileRequest(BaseModel):
     goal: str
     existing_skills: list[str] = Field(default_factory=list)
     time_constraint: str | None = None
+
+
+class SpeakRequest(BaseModel):
+    text: str

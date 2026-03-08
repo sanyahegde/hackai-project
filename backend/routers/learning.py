@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 
 from db import get_learning_history, get_watched_videos, get_profiles
-from models import LogConceptRequest, LogWatchedRequest, ProfileRequest
+from models import LogConceptRequest, LogWatchedRequest, ProfileRequest, SpeakRequest
 from services.skill_scorer import compute_skill_scores
 from services.recommender import get_recommendations, get_video_for_topic
 
@@ -117,3 +118,42 @@ async def recommendations(user_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
     return {"user_id": user_id, "recommendations": results, "gaps_addressed": weak_categories}
+
+
+@router.post("/speak")
+async def speak(body: SpeakRequest):
+    """Convert text to speech using ElevenLabs API and return audio."""
+    import httpx
+    from config import ELEVENLABS_API_KEY
+    
+    if not ELEVENLABS_API_KEY:
+        raise HTTPException(status_code=500, detail="ElevenLabs API key not configured")
+    
+    if not body.text or not body.text.strip():
+        raise HTTPException(status_code=400, detail="Text is required")
+    
+    try:
+        url = "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM"
+        headers = {
+            "xi-api-key": ELEVENLABS_API_KEY,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "text": body.text.strip(),
+            "model_id": "eleven_monolingual_v1",
+            "voice_settings": {
+                "stability": 0.5,
+                "similarity_boost": 0.75,
+            }
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            audio_bytes = response.content
+            
+        return Response(content=audio_bytes, media_type="audio/mpeg")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"ElevenLabs API error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Text-to-speech failed: {str(e)}")

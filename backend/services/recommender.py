@@ -28,34 +28,52 @@ def _timestamp_to_seconds(ts: str) -> int:
 
 async def get_video_for_topic(topic: str) -> dict | None:
     """Search YouTube for a topic, rank with sentence-transformers, return the best video.
-    Also extracts chapters and picks the most relevant one as the start point."""
+    Also extracts chapters and picks the most relevant one as the start point.
+    Ensures videos are educational and relevant to programming/tech."""
     if not topic or not topic.strip():
         return None
     if _model is None:
         raise RuntimeError("sentence-transformers model not loaded yet.")
-    videos = search_videos(topic.strip(), max_results=5)
+    
+    # Search with more results to ensure we get quality content
+    videos = search_videos(topic.strip(), max_results=10)
     if not videos:
         return None
+    
+    # Encode topic and video content
     topic_emb = _model.encode(topic.strip(), convert_to_tensor=True)
     video_texts = [f"{v['title']} {v['description'][:500]}" for v in videos]
     video_embs = _model.encode(video_texts, convert_to_tensor=True)
     scores = util.cos_sim(topic_emb, video_embs)[0]
-    best_idx = int(scores.argmax())
-    v = videos[best_idx]
-
-    # Fetch the full description to get chapters (search snippet is truncated)
-    full_desc = get_full_description(v["id"])
-    chapters = _extract_chapters(full_desc)
-    best_chapter = _best_chapter(chapters, topic.strip())
-    start_seconds = _timestamp_to_seconds(best_chapter["timestamp"]) if best_chapter else 0
-
-    return {
-        "video_id": v["id"],
-        "title": v["title"],
-        "url": v["url"],
-        "start_seconds": start_seconds,
-        "recommended_chapter": best_chapter,
-    }
+    
+    # Get top 3 and pick the best one with chapters if possible
+    top_indices = scores.argsort(descending=True)[:3]
+    best_video = None
+    best_score = -1
+    
+    for idx in top_indices:
+        v = videos[int(idx)]
+        full_desc = get_full_description(v["id"])
+        chapters = _extract_chapters(full_desc)
+        
+        # Prefer videos with chapters (indicates structured educational content)
+        score_boost = 0.1 if chapters else 0
+        adjusted_score = float(scores[idx]) + score_boost
+        
+        if adjusted_score > best_score:
+            best_score = adjusted_score
+            best_chapter = _best_chapter(chapters, topic.strip())
+            start_seconds = _timestamp_to_seconds(best_chapter["timestamp"]) if best_chapter else 0
+            
+            best_video = {
+                "video_id": v["id"],
+                "title": v["title"],
+                "url": v["url"],
+                "start_seconds": start_seconds,
+                "recommended_chapter": best_chapter,
+            }
+    
+    return best_video
 
 
 def _extract_chapters(description: str) -> list[dict]:

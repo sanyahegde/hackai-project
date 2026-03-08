@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Environment variables — never commit these
+.env
+.env.local
+.env.*.local
+
+# Vite build output
+dist/
+dist-ssr/
+
+# Misc
+.DS_Store
+*.local
+*.tar.gz

@@ -7,6 +7,19 @@ const ANTHROPIC_API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY;
 const ANTHROPIC_MODEL = "claude-haiku-4-5";
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+
+function getOrCreateUserId() {
+  let id = localStorage.getItem("learnflow_user_id");
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem("learnflow_user_id", id);
+  }
+  return id;
+}
+
+const USER_ID = getOrCreateUserId();
+
 const DETECT_PROMPT = `You are an educational image analyzer. Analyze this screenshot from an educational video or lecture. Identify each distinct concept, diagram, data structure, formula, or labeled element visible in the image. For each identified item, return:
 - name: short label
 - description: 1-2 sentence explanation suitable for a student
@@ -345,6 +358,19 @@ export default function App() {
         learnedAt: new Date().toISOString(),
       }];
     });
+
+    // Persist to backend (fire-and-forget; UI stays instant)
+    fetch(`${API_BASE}/api/log-concept`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: USER_ID,
+        concept: concept.name,
+        category: concept.category || "general",
+        video_id: videoId || "",
+        timestamp: currentTime,
+      }),
+    }).catch((err) => console.warn("log-concept failed:", err));
   };
 
   /* ═══════════════════════════════════════════════════

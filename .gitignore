@@ -5,6 +5,7 @@ node_modules/
 .env
 .env.local
 .env.*.local
+backend/.env
 
 # Vite build output
 dist/

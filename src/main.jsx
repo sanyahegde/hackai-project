@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useState, useCallback } from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import App from "./App_FULL.jsx";
+import { PERSONAS, seedPersona } from "./components/PersonaLogin.jsx";
 
 class ErrorBoundary extends React.Component {
   state = { hasError: false, error: null };
@@ -21,12 +22,42 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+function Root() {
+  const [persona, setPersona] = useState(() => {
+    const saved = localStorage.getItem("learnflow_persona");
+    if (saved) return JSON.parse(saved);
+    return PERSONAS[0];
+  });
+
+  const [switchKey, setSwitchKey] = useState(0);
+
+  const handleSwitch = useCallback(async (p) => {
+    await seedPersona(p);
+    setPersona(p);
+    setSwitchKey((k) => k + 1);
+  }, []);
+
+  // Seed on first load
+  React.useEffect(() => {
+    seedPersona(persona);
+  }, []);
+
+  return (
+    <App
+      key={switchKey}
+      persona={persona}
+      allPersonas={PERSONAS}
+      onSwitchPersona={handleSwitch}
+    />
+  );
+}
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <ErrorBoundary>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<App />} />
+          <Route path="/" element={<Root />} />
         </Routes>
       </BrowserRouter>
     </ErrorBoundary>

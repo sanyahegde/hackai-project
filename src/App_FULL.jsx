@@ -20,8 +20,6 @@ function getOrCreateUserId() {
   return id;
 }
 
-const USER_ID = getOrCreateUserId();
-
 const DETECT_PROMPT = `You are an educational image analyzer. Analyze this screenshot from an educational video or lecture. Identify each distinct concept, diagram, data structure, formula, or labeled element visible in the image. For each identified item, return:
 - name: short label
 - description: 1-2 sentence explanation suitable for a student
@@ -79,9 +77,37 @@ function extractVideoId(url) {
 }
 
 /* ═══════════════════════════════════════════════════
+   Segment matching — skip to the most relevant part
+   ═══════════════════════════════════════════════════ */
+function findBestSegment(videoObj, learnNext) {
+  if (!videoObj?.segments?.length || !learnNext) return null;
+  const target = learnNext.toLowerCase();
+  for (const seg of videoObj.segments) {
+    for (const t of seg.topics) {
+      if (t.toLowerCase() === target) return seg;
+    }
+  }
+  for (const seg of videoObj.segments) {
+    for (const t of seg.topics) {
+      if (t.toLowerCase().includes(target) || target.includes(t.toLowerCase())) return seg;
+    }
+  }
+  return null;
+}
+
+function formatTimestamp(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/* ═══════════════════════════════════════════════════
    MAIN COMPONENT
    ═══════════════════════════════════════════════════ */
-export default function App() {
+export default function App({ persona, allPersonas = [], onSwitchPersona }) {
+  const USER_ID = persona?.id || getOrCreateUserId();
+  const DOMAIN = persona?.domain || localStorage.getItem("learnflow_domain") || "dsa";
+  const DEFAULT_VIDEO_ID = persona?.defaultVideo || null;
   const [searchParams] = useSearchParams();
   const [videoUrl, setVideoUrl] = useState("");
   const [videoId, setVideoId] = useState(null);
@@ -101,13 +127,31 @@ export default function App() {
   const [showSummary, setShowSummary] = useState(false);
   const [sessionConceptsCount, setSessionConceptsCount] = useState(0);
 
-  // Check for existing profile on mount
+  // If persona provided, skip onboarding and use persona profile
   useEffect(() => {
-    const savedProfile = localStorage.getItem("learnflow_profile");
-    if (savedProfile) {
-      setUserProfile(JSON.parse(savedProfile));
+    if (persona) {
+      setUserProfile({
+        user_id: persona.id,
+        role: persona.role,
+        goal: persona.goal,
+        existing_skills: persona.skills || [],
+      });
+      setShowOnboarding(false);
+      if (DEFAULT_VIDEO_ID && !videoId) {
+        setVideoUrl(`https://www.youtube.com/watch?v=${DEFAULT_VIDEO_ID}`);
+        setVideoId(DEFAULT_VIDEO_ID);
+      }
+      fetch(`${API_BASE}/api/skill-scores/${USER_ID}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => { if (d) setSkillScores(d); })
+        .catch(() => {});
     } else {
-      setShowOnboarding(true);
+      const savedProfile = localStorage.getItem("learnflow_profile");
+      if (savedProfile) {
+        setUserProfile(JSON.parse(savedProfile));
+      } else {
+        setShowOnboarding(true);
+      }
     }
   }, []);
 
@@ -137,6 +181,8 @@ export default function App() {
   const [recommendedChapter, setRecommendedChapter] = useState(null);
   const [recommendation, setRecommendation] = useState(null);
   const [skillScores, setSkillScores] = useState(null);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [nextVideoIndex, setNextVideoIndex] = useState(0);
 
   const playerRef = useRef(null);
   const playerInstanceRef = useRef(null);
@@ -207,6 +253,41 @@ export default function App() {
 
   // Watch next video from summary
   const handleWatchNext = async () => {
+    const curatedList = persona?.recommendedVideos;
+
+    if (curatedList && curatedList.length > 0) {
+      const idx = nextVideoIndex % curatedList.length;
+      const videoObj = curatedList[idx];
+      const nextId = typeof videoObj === "string" ? videoObj : videoObj.id;
+      const learnNext = skillScores?.learn_next;
+      const bestSeg = typeof videoObj === "object" ? findBestSegment(videoObj, learnNext) : null;
+
+      console.log("[Cognify] Watch next (summary) →", nextId, "| learn_next:", learnNext, "| segment:", bestSeg);
+
+      setVideoUrl(`https://www.youtube.com/watch?v=${nextId}`);
+      setVideoId(nextId);
+      setConcepts([]);
+      setSelectedConcept(null);
+      setHasScanned(false);
+      setCapturedFramePreview(null);
+      setScanHistory([]);
+      setSelectedHistoryScan(null);
+
+      if (bestSeg) {
+        setStartSeconds(bestSeg.startTime);
+        setRecommendedChapter({ timestamp: formatTimestamp(bestSeg.startTime), label: bestSeg.label });
+      } else {
+        setStartSeconds(0);
+        setRecommendedChapter(null);
+      }
+
+      setLearningLog([]);
+      setShowSummary(false);
+      setIsPaused(false);
+      setNextVideoIndex(idx + 1);
+      return;
+    }
+
     const query = skillScores?.learn_next
       ? `${skillScores.learn_next} tutorial`
       : recommendation?.recommended_query || recommendation?.topic;
@@ -226,7 +307,6 @@ export default function App() {
         return;
       }
 
-      // Reset session state
       setVideoUrl(data.url || `https://www.youtube.com/watch?v=${data.video_id}`);
       setVideoId(data.video_id);
       setConcepts([]);
@@ -241,7 +321,6 @@ export default function App() {
       setShowSummary(false);
       setIsPaused(false);
 
-      // Log as watched
       fetch(`${API_BASE}/api/log-watched`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -562,6 +641,38 @@ export default function App() {
   };
 
   const loadRecommendedNext = async () => {
+    const curatedList = persona?.recommendedVideos;
+
+    if (curatedList && curatedList.length > 0) {
+      const idx = nextVideoIndex % curatedList.length;
+      const videoObj = curatedList[idx];
+      const nextId = typeof videoObj === "string" ? videoObj : videoObj.id;
+      const learnNext = skillScores?.learn_next;
+      const bestSeg = typeof videoObj === "object" ? findBestSegment(videoObj, learnNext) : null;
+
+      console.log("[Cognify] Watch next →", nextId, "| learn_next:", learnNext, "| segment:", bestSeg);
+
+      setVideoUrl(`https://www.youtube.com/watch?v=${nextId}`);
+      setVideoId(nextId);
+      setConcepts([]);
+      setSelectedConcept(null);
+      setHasScanned(false);
+      setCapturedFramePreview(null);
+      setScanHistory([]);
+      setSelectedHistoryScan(null);
+
+      if (bestSeg) {
+        setStartSeconds(bestSeg.startTime);
+        setRecommendedChapter({ timestamp: formatTimestamp(bestSeg.startTime), label: bestSeg.label });
+      } else {
+        setStartSeconds(0);
+        setRecommendedChapter(null);
+      }
+
+      setNextVideoIndex(idx + 1);
+      return;
+    }
+
     const query = skillScores?.learn_next
       ? `${skillScores.learn_next} tutorial`
       : recommendation?.recommended_query;
@@ -707,7 +818,7 @@ export default function App() {
               fontFamily: "'DM Sans', sans-serif",
               fontSize: 24, fontWeight: 700, color: "#fff",
               marginBottom: 8,
-            }}>Welcome to LearnFlow</h2>
+            }}>Welcome to Cognify</h2>
             <p style={{
               fontSize: 13, color: "rgba(255,255,255,0.4)",
               marginBottom: 28, lineHeight: 1.5,
@@ -874,7 +985,7 @@ export default function App() {
                 marginBottom: 12,
               }}>Your Skill Map</h3>
               <div style={{ height: 220 }}>
-                <SkillRadarChart scores={skillScores?.scores ?? []} />
+                <SkillRadarChart scores={skillScores?.scores ?? []} domain={DOMAIN} />
               </div>
             </div>
 
@@ -975,7 +1086,7 @@ export default function App() {
               fontFamily: "'DM Sans', sans-serif",
               fontSize: 17, fontWeight: 700, color: "#fff",
               letterSpacing: "-0.3px",
-            }}>LearnFlow</h1>
+            }}>Cognify</h1>
             <p style={{
               fontSize: 10, color: "rgba(255,255,255,0.3)",
               fontFamily: "'DM Mono', monospace",
@@ -984,17 +1095,102 @@ export default function App() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {userProfile?.goal && (
-            <div style={{
-              padding: "4px 10px",
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: 16,
-              fontSize: 10,
-              color: "rgba(255,255,255,0.4)",
-              fontFamily: "'DM Mono', monospace",
-            }}>
-              Learning: {userProfile.goal}
+          {allPersonas.length > 0 && (
+            <div style={{ position: "relative", fontFamily: "'DM Sans', sans-serif" }}>
+              <button
+                onClick={() => setShowAccountMenu((v) => !v)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "6px 14px",
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: 8,
+                  color: "#fff",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                {persona?.name || "Account"}
+                <span style={{
+                  fontSize: 9,
+                  color: "rgba(255,255,255,0.4)",
+                  marginLeft: 2,
+                  transform: showAccountMenu ? "rotate(180deg)" : "rotate(0deg)",
+                  transition: "transform 0.15s ease",
+                  display: "inline-block",
+                }}>&#9660;</span>
+              </button>
+              {showAccountMenu && (
+                <>
+                  <div
+                    onClick={() => setShowAccountMenu(false)}
+                    style={{ position: "fixed", inset: 0, zIndex: 998 }}
+                  />
+                  <div style={{
+                    position: "absolute",
+                    top: "calc(100% + 6px)",
+                    right: 0,
+                    minWidth: 200,
+                    background: "#18181b",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    borderRadius: 10,
+                    padding: "6px 0",
+                    zIndex: 999,
+                    boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+                  }}>
+                    <div style={{
+                      padding: "6px 14px 8px",
+                      fontSize: 10,
+                      color: "rgba(255,255,255,0.3)",
+                      textTransform: "uppercase",
+                      letterSpacing: "1px",
+                      fontWeight: 600,
+                    }}>Accounts</div>
+                    {allPersonas.map((p) => {
+                      const isActive = persona?.id === p.id;
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => {
+                            setShowAccountMenu(false);
+                            if (!isActive) onSwitchPersona(p);
+                          }}
+                          style={{
+                            display: "flex", alignItems: "center", justifyContent: "space-between",
+                            width: "100%",
+                            padding: "9px 14px",
+                            background: isActive ? "rgba(255,255,255,0.06)" : "transparent",
+                            border: "none",
+                            color: isActive ? "#fff" : "rgba(255,255,255,0.6)",
+                            fontSize: 13,
+                            fontWeight: isActive ? 600 : 400,
+                            cursor: isActive ? "default" : "pointer",
+                            textAlign: "left",
+                            fontFamily: "'DM Sans', sans-serif",
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isActive) e.currentTarget.style.background = "rgba(255,255,255,0.06)";
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isActive) e.currentTarget.style.background = "transparent";
+                          }}
+                        >
+                          <div>
+                            <div>{p.name}</div>
+                            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 1 }}>
+                              {p.role}
+                            </div>
+                          </div>
+                          {isActive && (
+                            <span style={{ fontSize: 11, color: "#6366f1" }}>&#10003;</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           )}
           {learningLog.length > 0 && (
@@ -1775,7 +1971,7 @@ export default function App() {
                     fontFamily: "'DM Mono', monospace",
                   }}>Your Skill Map</h3>
                   <div style={{ width: "100%", minHeight: 250 }}>
-                    <SkillRadarChart scores={skillScores?.scores ?? []} />
+                    <SkillRadarChart scores={skillScores?.scores ?? []} domain={DOMAIN} />
                   </div>
                 </div>
 
@@ -1843,22 +2039,44 @@ export default function App() {
                             Recommended next topic: {learnNext}
                           </p>
                         )}
-                        {(learnNext || recommendation?.recommended_query) && (
-                          <button
-                            type="button"
-                            onClick={loadRecommendedNext}
-                            style={{
-                              width: "100%", padding: "8px 12px",
-                              background: "#6366f1",
-                              border: "none", borderRadius: 8,
-                              color: "#fff", fontSize: 12, fontWeight: 600,
-                              cursor: "pointer",
-                              fontFamily: "'DM Sans', sans-serif",
-                            }}
-                          >
-                            Watch next
-                          </button>
-                        )}
+                        {(learnNext || recommendation?.recommended_query) && (() => {
+                          const curatedList = persona?.recommendedVideos;
+                          let previewSeg = null;
+                          if (curatedList?.length && learnNext) {
+                            const idx = nextVideoIndex % curatedList.length;
+                            const vo = curatedList[idx];
+                            if (typeof vo === "object") previewSeg = findBestSegment(vo, learnNext);
+                          }
+                          return (
+                            <div>
+                              <button
+                                type="button"
+                                onClick={loadRecommendedNext}
+                                style={{
+                                  width: "100%", padding: "8px 12px",
+                                  background: "#6366f1",
+                                  border: "none", borderRadius: 8,
+                                  color: "#fff", fontSize: 12, fontWeight: 600,
+                                  cursor: "pointer",
+                                  fontFamily: "'DM Sans', sans-serif",
+                                }}
+                              >
+                                {previewSeg
+                                  ? `Watch next — skip to ${formatTimestamp(previewSeg.startTime)}`
+                                  : "Watch next"}
+                              </button>
+                              {previewSeg && (
+                                <p style={{
+                                  marginTop: 6, fontSize: 11,
+                                  color: "rgba(255,255,255,0.4)",
+                                  fontFamily: "'DM Mono', monospace",
+                                }}>
+                                  ⏩ {previewSeg.label}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </>
                     );
                   })()}

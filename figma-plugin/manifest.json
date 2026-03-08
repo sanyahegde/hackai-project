@@ -1,0 +1,11 @@
+{
+  "name": "LearnFlow – Code to Figma",
+  "id": "learnflow-code-to-figma",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "networkAccess": {
+    "allowedDomains": ["none"]
+  }
+}

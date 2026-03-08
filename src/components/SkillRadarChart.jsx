@@ -7,43 +7,45 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-/** Full DSA skill list (matches backend skill_map). Missing skills from API default to 0. */
-const ALL_SKILLS = [
-  "Arrays",
-  "Strings",
-  "Hash Tables",
-  "Sorting",
-  "Binary Search",
-  "Trees",
-  "Graphs",
-  "Heaps",
-  "Backtracking",
-  "Dynamic Programming",
-];
+const SKILL_LISTS = {
+  dsa: [
+    "Arrays", "Strings", "Hash Tables", "Stacks", "Queues", "Linked Lists",
+    "Sorting", "Binary Search", "Trees", "Graphs", "Heaps",
+    "Backtracking", "Dynamic Programming",
+  ],
+  ml: [
+    "Supervised Learning", "Linear Models", "Neural Networks", "Deep Learning",
+    "Data Preprocessing", "Model Evaluation", "Unsupervised Learning",
+    "Reinforcement Learning", "NumPy & Pandas", "Training Pipeline",
+  ],
+  ai_strategy: [
+    "ML Fundamentals", "LLMs", "Prompt Engineering", "Fine-tuning", "RAG",
+    "AI Ethics", "AI Deployment", "AI Use Cases", "AI Product Strategy",
+    "Transformer Architecture",
+  ],
+  cloud: [
+    "AWS Basics", "Virtual Machines", "Storage", "Docker", "Kubernetes",
+    "CI/CD", "Serverless", "Infrastructure as Code", "Networking",
+    "Data Pipelines",
+  ],
+};
 
-/**
- * Build chart data from API scores. Skills not in the response get score 0.
- * @param {Array<{ skill: string, score: number }>} scores - from GET /api/skill-scores
- * @returns {Array<{ skill: string, score: number }>}
- */
-function buildRadarData(scores) {
+function buildRadarData(scores, domain) {
+  const allSkills = SKILL_LISTS[domain] || SKILL_LISTS.dsa;
   const bySkill = {};
   if (Array.isArray(scores)) {
     scores.forEach((s) => {
       bySkill[s.skill] = s.score;
     });
   }
-  return ALL_SKILLS.map((skill) => ({
+  return allSkills.map((skill) => ({
     skill,
     score: bySkill[skill] ?? 0,
   }));
 }
 
-/**
- * Radar chart for skill scores. Uses backend scores; missing skills default to 0.
- */
-export default function SkillRadarChart({ scores = [] }) {
-  const data = buildRadarData(scores);
+export default function SkillRadarChart({ scores = [], domain = "dsa" }) {
+  const data = buildRadarData(scores, domain);
 
   return (
     <ResponsiveContainer width="100%" height={250}>

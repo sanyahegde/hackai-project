@@ -26,11 +26,8 @@ class LogWatchedRequest(BaseModel):
 
 class ProfileRequest(BaseModel):
     user_id: str
-    role: str
-    goal: str
+    role: str = ""
+    goal: str = ""
     existing_skills: list[str] = Field(default_factory=list)
     time_constraint: str | None = None
-
-
-class SpeakRequest(BaseModel):
-    text: str
+    domain: str = "dsa"

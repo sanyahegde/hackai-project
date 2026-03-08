@@ -21,3 +21,7 @@ def get_db():
 
 def get_learning_history():
     return get_db()["learning_history"]
+
+
+def get_watched_videos():
+    return get_db()["watched_videos"]

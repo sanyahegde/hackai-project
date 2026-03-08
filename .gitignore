@@ -11,6 +11,10 @@ backend/.env
 dist/
 dist-ssr/
 
+# Python
+__pycache__/
+*.pyc
+
 # Misc
 .DS_Store
 *.local

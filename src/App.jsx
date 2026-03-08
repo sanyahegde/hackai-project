@@ -95,6 +95,8 @@ export default function App() {
 
   const [scanHistory, setScanHistory] = useState([]);
   const [selectedHistoryScan, setSelectedHistoryScan] = useState(null);
+  const [startSeconds, setStartSeconds] = useState(0);
+  const [recommendedChapter, setRecommendedChapter] = useState(null);
 
   const playerRef = useRef(null);
   const playerInstanceRef = useRef(null);
@@ -165,6 +167,8 @@ export default function App() {
   /* ── Create / recreate YouTube player ── */
   useEffect(() => {
     if (!videoId) return;
+    // Capture startSeconds at the time the effect fires (closure over current value)
+    const startAt = startSeconds;
     let player;
     let destroyed = false;
 
@@ -193,6 +197,7 @@ export default function App() {
           rel: 0,
           controls: 1,
           playsinline: 1,
+          ...(startAt > 0 ? { start: startAt } : {}),
         },
         events: {
           onStateChange: (event) => {
@@ -239,23 +244,56 @@ export default function App() {
     };
   }, [videoId]);
 
-  /* ── Load video ── */
-  const handleLoadVideo = () => {
-    const id = extractVideoId(videoUrl);
-    if (id) {
-      setVideoId(id);
-      setConcepts([]);
-      setSelectedConcept(null);
-      setError(null);
-      setIsPaused(false);
-      setHasScanned(false);
-      setCapturedFramePreview(null);
-      setScanHistory([]);
-      setSelectedHistoryScan(null);
-      pauseScanTriggeredRef.current = false;
-    } else {
-      setError("Invalid YouTube URL. Paste a full link like https://youtube.com/watch?v=...");
+  /* ── Load video (URL or topic) ── */
+  const handleLoadVideo = async () => {
+    const input = videoUrl.trim();
+    if (!input) {
+      setError("Enter a YouTube URL or a topic (e.g. Dynamic Programming)");
+      return;
     }
+
+    let id = extractVideoId(input);
+
+    // If not a URL, treat as topic and search for a video
+    let topicStartSeconds = 0;
+    let topicChapter = null;
+    if (!id) {
+      setError(null);
+      try {
+        const res = await fetch(`${API_BASE}/api/video-for-topic?topic=${encodeURIComponent(input)}`);
+        const data = await res.json();
+        if (data.error || !data.video_id) {
+          setError(data.error || "No videos found for that topic. Try a different phrase.");
+          return;
+        }
+        id = data.video_id;
+        setVideoUrl(data.url);
+        topicStartSeconds = data.start_seconds || 0;
+        topicChapter = data.recommended_chapter || null;
+      } catch (err) {
+        setError("Could not find video. Is the backend running?");
+        return;
+      }
+    }
+
+    setStartSeconds(topicStartSeconds);
+    setRecommendedChapter(topicChapter);
+    setVideoId(id);
+    setConcepts([]);
+    setSelectedConcept(null);
+    setError(null);
+    setIsPaused(false);
+    setHasScanned(false);
+    setCapturedFramePreview(null);
+    setScanHistory([]);
+    setSelectedHistoryScan(null);
+    pauseScanTriggeredRef.current = false;
+
+    fetch(`${API_BASE}/api/log-watched`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: USER_ID, video_id: id }),
+    }).catch((err) => console.warn("log-watched failed:", err));
   };
 
   /* ── Analyze frame via Anthropic ── */
@@ -564,7 +602,7 @@ export default function App() {
           <div style={{ display: "flex", gap: 8 }}>
             <input
               type="text"
-              placeholder="Paste YouTube URL..."
+              placeholder="YouTube URL or topic (e.g. Dynamic Programming)"
               value={videoUrl}
               onChange={(e) => setVideoUrl(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleLoadVideo()}
@@ -620,7 +658,7 @@ export default function App() {
                 value={videoUrl}
                 onChange={(e) => setVideoUrl(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleLoadVideo()}
-                placeholder="Paste another YouTube URL..."
+                placeholder="URL or topic..."
                 style={{
                   flex: 1, padding: "9px 12px",
                   background: "rgba(255,255,255,0.04)",
@@ -638,6 +676,29 @@ export default function App() {
                 fontFamily: "'DM Sans', sans-serif",
               }}>Load</button>
             </div>
+
+            {/* Chapter jump banner */}
+            {recommendedChapter && startSeconds > 0 && (
+              <div style={{
+                marginBottom: 8,
+                padding: "7px 14px",
+                background: "rgba(99,102,241,0.12)",
+                border: "1px solid rgba(99,102,241,0.25)",
+                borderRadius: 8,
+                fontSize: 12,
+                color: "#818cf8",
+                fontFamily: "'DM Mono', monospace",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}>
+                <span>⏩</span>
+                <span>
+                  Jumped to <strong style={{ color: "#a5b4fc" }}>{recommendedChapter.timestamp}</strong>
+                  {" — "}{recommendedChapter.label}
+                </span>
+              </div>
+            )}
 
             {/* Video + overlay container */}
             <div style={{
@@ -661,18 +722,36 @@ export default function App() {
                   pointerEvents: loading ? "none" : "auto",
                   zIndex: 20,
                 }}>
+                  {/* Captured frame covers the iframe entirely — hides YouTube's pause recommendations */}
+                  {capturedFramePreview && (
+                    <img
+                      src={capturedFramePreview}
+                      alt=""
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        zIndex: 1,
+                        display: "block",
+                      }}
+                    />
+                  )}
                   {/* Scan animation */}
                   {loading && (
                     <>
                       <div style={{
                         position: "absolute", inset: 0,
                         background: "rgba(0,0,0,0.2)",
+                        zIndex: 2,
                       }} />
                       <div style={{
                         position: "absolute", left: 0, right: 0, height: 2,
                         background: "linear-gradient(90deg, transparent, #6366f1, transparent)",
                         boxShadow: "0 0 30px rgba(99,102,241,0.5)",
                         animation: "scan 1.2s ease-in-out infinite",
+                        zIndex: 3,
                       }} />
                       <div style={{
                         position: "absolute",
@@ -685,6 +764,7 @@ export default function App() {
                         color: "#818cf8",
                         fontFamily: "'DM Mono', monospace",
                         border: "1px solid rgba(99,102,241,0.3)",
+                        zIndex: 3,
                       }}>Scanning frame...</div>
                     </>
                   )}

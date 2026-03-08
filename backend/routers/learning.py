@@ -2,12 +2,24 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
-from db import get_learning_history
-from models import LogConceptRequest
+from db import get_learning_history, get_watched_videos
+from models import LogConceptRequest, LogWatchedRequest
 from services.skill_scorer import compute_skill_scores
-from services.recommender import get_recommendations
+from services.recommender import get_recommendations, get_video_for_topic
 
 router = APIRouter(prefix="/api")
+
+
+@router.post("/log-watched", status_code=201)
+async def log_watched(body: LogWatchedRequest):
+    """Mark a video as watched so it won't be recommended again."""
+    col = get_watched_videos()
+    col.update_one(
+        {"user_id": body.user_id, "video_id": body.video_id},
+        {"$set": {"user_id": body.user_id, "video_id": body.video_id}},
+        upsert=True,
+    )
+    return {"status": "ok"}
 
 
 @router.post("/log-concept", status_code=201)
@@ -48,20 +60,39 @@ async def skill_scores(user_id: str):
     }
 
 
+@router.get("/video-for-topic")
+async def video_for_topic(topic: str = ""):
+    """Get the best YouTube video for a topic (word or phrase)."""
+    if not topic.strip():
+        return {"video_id": None, "title": None, "url": None, "error": "Topic is required"}
+    try:
+        result = await get_video_for_topic(topic)
+        if result:
+            return result
+        return {"video_id": None, "title": None, "url": None, "error": "No videos found"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/recommendations/{user_id}")
 async def recommendations(user_id: str):
     col = get_learning_history()
+    watched_col = get_watched_videos()
     docs = list(col.find({"user_id": user_id}, {"_id": 0}))
     if not docs:
         return {"user_id": user_id, "recommendations": [], "message": "No learning history yet. Start watching and clicking concepts!"}
 
+    # Videos to exclude: from learning_history + watched_videos
+    watched_ids = {d["video_id"] for d in docs if d.get("video_id")}
+    for w in watched_col.find({"user_id": user_id}, {"video_id": 1}):
+        watched_ids.add(w["video_id"])
+
     scores = compute_skill_scores(docs)
     gaps = sorted(scores.items(), key=lambda x: x[1])
-    # take the weakest 2 categories
     weak_categories = [k for k, _ in gaps[:2]]
 
     try:
-        results = await get_recommendations(docs, weak_categories)
+        results = await get_recommendations(docs, weak_categories, watched_video_ids=watched_ids)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
